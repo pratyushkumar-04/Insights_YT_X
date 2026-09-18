@@ -30,19 +30,16 @@ class TwitterTweetRequest(BaseModel):
 
 
 class TwitterPost(BaseModel):
-    """Normalized Twitter post payload."""
-
     id: str
     text: str
-    author: Optional[str] = None
-    author_id: Optional[str] = None
-    created_at: Optional[str] = None
-    likes: Optional[int] = None
-    retweets: Optional[int] = None
-    replies: Optional[int] = None
-    raw_data: Dict[str, Any] = Field(default_factory=dict)
-
-
+    author: str | None
+    author_id: str | None
+    created_at: str | None
+    likes: int
+    retweets: int
+    replies: int
+    comments: list[dict] = []
+    raw_data: dict
 class TwitterSearchResponse(BaseModel):
     """Response for a search on Twitter/X."""
 

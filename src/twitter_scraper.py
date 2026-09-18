@@ -10,6 +10,7 @@ import argparse
 import json
 import logging
 import re
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -24,13 +25,13 @@ import pandas as pd
 class TwitterConfig:
     default_directory: str = "data/twitter"
     rate_limit_seconds: float = 2.5
+    # One initial call plus at most three retries.
     retry_attempts: int = 3
     retry_backoff_seconds: float = 2.0
     logging_level: str = "INFO"
     output_formats: List[str] = field(default_factory=lambda: ["json", "csv", "excel"])
     headless: bool = True
     max_reply_depth: int = 3
-    request_timeout_seconds: int = 60
 
     @classmethod
     def from_file(cls, path: str | Path) -> "TwitterConfig":
@@ -79,6 +80,10 @@ class TwitterScraper:
         self._client = client
         self._sleep = sleep
         self._last_request = 0.0
+        # A scraper is shared by the API service.  Serialising client calls
+        # keeps its request interval effective when FastAPI handles requests
+        # concurrently.
+        self._request_lock = threading.Lock()
         self.logger = _logger(self.config)
 
     @staticmethod
@@ -99,20 +104,6 @@ class TwitterScraper:
             except ImportError as error:
                 raise RuntimeError("Scweet is required. Install dependencies with: pip install -r requirements.txt") from error
             
-            if self.auth_token:
-                try:
-                    import sqlite3
-                    db_file = Path("scweet_state.db")
-                    if db_file.exists():
-                        conn = sqlite3.connect(db_file)
-                        cur = conn.cursor()
-                        cur.execute("DELETE FROM accounts WHERE auth_token != ?", (self.auth_token,))
-                        cur.execute("UPDATE accounts SET daily_requests = 0, daily_tweets = 0, status = 1, available_til = 0.0 WHERE auth_token = ?", (self.auth_token,))
-                        conn.commit()
-                        conn.close()
-                except Exception as err:
-                    self.logger.debug("Database cleanup notice: %s", err)
-
             kwargs: Dict[str, Any] = {
                 "config": ScweetConfig(daily_requests_limit=10000, daily_tweets_limit=100000)
             }
@@ -133,25 +124,26 @@ class TwitterScraper:
         method = getattr(client, method_name, None)
         if method is None:
             raise RuntimeError(f"The installed Scweet client does not support {method_name}()")
-        elapsed = time.monotonic() - self._last_request
-        if elapsed < self.config.rate_limit_seconds:
-            self._sleep(self.config.rate_limit_seconds - elapsed)
-        for attempt in range(self.config.retry_attempts + 1):
-            started = time.perf_counter()
-            try:
-                self.logger.debug("Scweet request method=%s args=%s kwargs=%s", method_name, args, kwargs)
-                result = method(*args, **kwargs)
-                self._last_request = time.monotonic()
-                self.logger.info("Scweet request method=%s completed in %.2fs", method_name, time.perf_counter() - started)
-                return result
-            except Exception as error:
-                self._last_request = time.monotonic()
-                if attempt >= self.config.retry_attempts:
-                    self.logger.exception("Scweet request failed after %d retries", attempt)
-                    raise
-                delay = self.config.retry_backoff_seconds * (2 ** attempt)
-                self.logger.warning("Scweet request failed (%s); retrying in %.1fs", error, delay)
-                self._sleep(delay)
+        with self._request_lock:
+            elapsed = time.monotonic() - self._last_request
+            if elapsed < self.config.rate_limit_seconds:
+                self._sleep(self.config.rate_limit_seconds - elapsed)
+            for attempt in range(self.config.retry_attempts + 1):
+                started = time.perf_counter()
+                try:
+                    self.logger.debug("Scweet request method=%s args=%s kwargs=%s", method_name, args, kwargs)
+                    result = method(*args, **kwargs)
+                    self._last_request = time.monotonic()
+                    self.logger.info("Scweet request method=%s completed in %.2fs", method_name, time.perf_counter() - started)
+                    return result
+                except Exception as error:
+                    self._last_request = time.monotonic()
+                    if attempt >= self.config.retry_attempts:
+                        self.logger.exception("Scweet request failed after %d retries", attempt)
+                        raise
+                    delay = self.config.retry_backoff_seconds * (2 ** attempt)
+                    self.logger.warning("Scweet request failed (%s); retrying in %.1fs", error, delay)
+                    self._sleep(delay)
 
     @staticmethod
     def _rows(value: Any) -> List[Dict[str, Any]]:
@@ -254,11 +246,13 @@ class TwitterScraper:
             raise LookupError(f"Tweet {tweet_id} was not found or is not publicly accessible")
 
         if fetch_replies:
-            try:
-                target_tweet["replies_data"] = self.extract_replies(url_or_id, max_replies=max_replies)
-            except Exception as err:
-                self.logger.warning("Failed to fetch replies for tweet %s: %s", tweet_id, err)
-                target_tweet["replies_data"] = []
+            # Do not turn a rate-limit or authentication failure into an empty
+            # comments list.  The caller needs to know that comments were not
+            # retrieved, rather than treating the response as "no comments".
+            target_tweet["replies_data"] = self.extract_replies(
+                url_or_id,
+                max_replies=max_replies,
+            )
 
         return target_tweet
 
@@ -371,25 +365,76 @@ class TwitterScraper:
         
         raise LookupError(f"Profile @{username} was not found or is not publicly accessible")
 
-    def get_user_posts(self, username: str, count: int = 100) -> List[Dict[str, Any]]:
-        """Fetch and normalize the most recent posts from a user's timeline."""
+    def get_user_posts(
+        self,
+        username: str,
+        count: int = 100,
+        include_replies: bool = True,
+        max_replies: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Fetch recent posts from a user and their replies/comments."""
+
         username = username.lstrip("@").strip()
+
         if not self.USERNAME.fullmatch(username):
-            raise ValueError("Username must contain 1-15 letters, numbers, or underscores")
+            raise ValueError(
+                "Username must contain 1-15 letters, numbers, or underscores"
+            )
+
         if count < 1:
             raise ValueError("count must be at least 1")
-        
+
         posts = []
+
         try:
-            rows = self._rows(self._call("get_profile_tweets", [username], limit=count))
-            posts = [self.normalize_tweet(row) for row in rows[:count]]
+            rows = self._rows(
+                self._call(
+                    "get_profile_tweets",
+                    [username],
+                    limit=count,
+                )
+            )
+
+            posts = [
+                self.normalize_tweet(row)
+                for row in rows[:count]
+            ]
+
         except Exception as err:
-            self.logger.warning("get_profile_tweets failed for @%s: %s", username, err)
-            
+            self.logger.warning(
+                "get_profile_tweets failed for @%s: %s",
+                username,
+                err,
+            )
+
         if not posts:
-            posts = self.search_tweets(f"from:{username}", count=count)
-            
-        self.logger.info("Fetched %d recent posts for @%s", len(posts), username)
+            posts = self.search_tweets(
+                f"from:{username}",
+                count=count,
+            )
+
+        # Fetch actual comments/replies for every post
+        if include_replies:
+            for post in posts:
+                tweet_id = post.get("tweet_id")
+
+                if not tweet_id:
+                    post["comments"] = []
+                    continue
+
+                # Propagate upstream failures instead of returning partial
+                # posts with misleading empty comment lists.
+                post["comments"] = self.extract_replies(
+                    tweet_id,
+                    max_replies=max_replies,
+                )
+
+        self.logger.info(
+            "Fetched %d recent posts for @%s",
+            len(posts),
+            username,
+        )
+
         return posts
 
     def search_tweets(self, query: str, since: Optional[str] = None, until: Optional[str] = None,
