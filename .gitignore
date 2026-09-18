@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+env/
+venv/
+ENV/
+.env
+
+# Generated data & exports
+data/
+outputs/
+*.json
+*.csv
+*.xlsx
+scweet_state.db
+
+# Logs
+*.log
+
+# OS & IDE metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
