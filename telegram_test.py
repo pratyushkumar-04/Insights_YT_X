@@ -10,7 +10,7 @@ API_HASH = "6244bb0e034408e82714dff8a4790d5e"
 
 client = TelegramClient("telegram_session", API_ID, API_HASH)
 
-MAX_POSTS = 100
+MAX_POSTS = 20
 MAX_POPULAR_POSTS = 5
 MAX_COMMENTS = 100
 MONTHS = 6
