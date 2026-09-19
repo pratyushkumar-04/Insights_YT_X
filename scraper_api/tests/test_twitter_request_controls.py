@@ -8,7 +8,7 @@ if str(ROOT_DIR) not in sys.path:
 from src.twitter_scraper import TwitterConfig, TwitterScraper
 
 
-def test_scweet_call_makes_at_most_three_retries() -> None:
+def test_scweet_call_makes_at_most_one_retry() -> None:
     calls = 0
 
     class FailingClient:
@@ -28,7 +28,26 @@ def test_scweet_call_makes_at_most_three_retries() -> None:
     except RuntimeError:
         pass
 
-    assert calls == 4  # initial attempt plus three retries
+    assert calls == 2  # initial attempt plus one retry
+
+
+def test_scweet_does_not_retry_an_empty_account_pool() -> None:
+    calls = 0
+
+    class FailingClient:
+        def search(self, *_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            raise RuntimeError("No eligible accounts (total=0, no accounts in pool)")
+
+    scraper = TwitterScraper(client=FailingClient(), sleep=lambda _seconds: None)
+
+    try:
+        scraper._call("search", "example")
+    except RuntimeError:
+        pass
+
+    assert calls == 1
 
 
 def test_reply_failure_is_not_reported_as_empty_comments() -> None:

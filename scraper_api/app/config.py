@@ -2,6 +2,7 @@
 
 from typing import List
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +44,14 @@ class Settings(BaseSettings):
     LOG_FORMAT: str = "json"
 
     METRICS_ENABLED: bool = True
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def normalize_debug_value(cls, value: object) -> object:
+        """Accept deployment labels accidentally supplied as DEBUG values."""
+        if isinstance(value, str) and value.strip().lower() in {"release", "production", "prod"}:
+            return False
+        return value
 
 
 settings = Settings()

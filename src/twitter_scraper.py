@@ -25,9 +25,10 @@ import pandas as pd
 class TwitterConfig:
     default_directory: str = "data/twitter"
     rate_limit_seconds: float = 2.5
-    # One initial call plus at most three retries.
-    retry_attempts: int = 3
-    retry_backoff_seconds: float = 2.0
+    # One initial call plus one short retry.  Scweet also has its own retry
+    # queue, so higher values here multiply a failed request's duration.
+    retry_attempts: int = 1
+    retry_backoff_seconds: float = 1.0
     logging_level: str = "INFO"
     output_formats: List[str] = field(default_factory=lambda: ["json", "csv", "excel"])
     headless: bool = True
@@ -104,12 +105,31 @@ class TwitterScraper:
             except ImportError as error:
                 raise RuntimeError("Scweet is required. Install dependencies with: pip install -r requirements.txt") from error
             
+            # Keep state in the project, not in whichever directory happens
+            # to start FastAPI.  Passing db_path to Scweet is necessary: its
+            # constructor otherwise replaces config.db_path with its relative
+            # default.
+            state_db_path = Path(__file__).resolve().parents[1] / "scweet_state.db"
             config = ScweetConfig(
+                db_path=str(state_db_path),
                 daily_requests_limit=10000,
                 daily_tweets_limit=100000,
                 api_http_mode="sync",
+                # Fail fast when the credential is invalid or no account is
+                # usable.  The defaults can wait 120 seconds for a cooldown,
+                # then retry every task several more times.
+                pool_wait_max_s=0,
+                max_task_attempts=1,
+                max_fallback_attempts=1,
+                max_account_switches=0,
+                task_retry_base_s=0,
+                task_retry_max_s=0,
+                transaction_init_attempts=1,
+                transaction_init_backoff_s=0,
+                request_404_retries=0,
+                n_splits=1,
             )
-            kwargs: Dict[str, Any] = {"config": config}
+            kwargs: Dict[str, Any] = {"config": config, "db_path": str(state_db_path)}
             if self.auth_token:
                 kwargs["auth_token"] = self.auth_token
             self._client = Scweet(**kwargs)
@@ -141,6 +161,25 @@ class TwitterScraper:
                     return result
                 except Exception as error:
                     self._last_request = time.monotonic()
+                    # A missing, invalid, or cooldown-blocked account cannot
+                    # be fixed by replaying the same request.  Retrying here
+                    # used to turn this immediate configuration error into a
+                    # multi-minute wait.
+                    message = str(error).lower()
+                    if any(
+                        marker in message
+                        for marker in (
+                            "no eligible account",
+                            "accountpoolexhausted",
+                            "no accounts in pool",
+                            "missing auth",
+                            "invalid credential",
+                            "authentication failed",
+                            "unauthorized",
+                        )
+                    ):
+                        self.logger.error("Scweet account is unavailable; not retrying: %s", error)
+                        raise
                     if attempt >= self.config.retry_attempts:
                         self.logger.exception("Scweet request failed after %d retries", attempt)
                         raise

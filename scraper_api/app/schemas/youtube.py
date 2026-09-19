@@ -17,7 +17,7 @@ class YouTubeChannelRequest(BaseModel):
     """Input for a channel extraction request."""
 
     channel_url: str = Field(..., description="YouTube channel URL")
-    max_videos: int = Field(default=20, ge=1, le=100)
+    max_videos: int = Field(default=5, ge=1, le=5)
     include_comments: bool = Field(default=False)
 
 
@@ -51,7 +51,7 @@ class YouTubeChannelResponse(BaseModel):
 class YouTubeBatchRequest(BaseModel):
     """Batch extraction request."""
 
-    video_urls: List[str] = Field(..., min_length=1)
+    video_urls: List[str] = Field(..., min_length=1, max_length=5)
     include_comments: bool = Field(default=False)
 
 

@@ -20,7 +20,7 @@ class TwitterUserRequest(BaseModel):
 
     username: str = Field(..., min_length=1)
     include_posts: bool = Field(default=False)
-    max_posts: int = Field(default=10, ge=1, le=50)
+    max_posts: int = Field(default=5, ge=1, le=5)
 
 
 class TwitterTweetRequest(BaseModel):
@@ -40,7 +40,6 @@ class TwitterPost(BaseModel):
     replies: int
     comments: list[dict] = Field(default_factory=list)
     raw_data: dict = Field(default_factory=dict)
-    saved_file: Optional[str] = None
 
 
 class TwitterSearchResponse(BaseModel):
@@ -49,7 +48,6 @@ class TwitterSearchResponse(BaseModel):
     query: str
     results: List[TwitterPost] = Field(default_factory=list)
     total: int = 0
-    saved_file: Optional[str] = None
 
 
 class TwitterUserResponse(BaseModel):
@@ -63,4 +61,3 @@ class TwitterUserResponse(BaseModel):
     verified: Optional[bool] = False
     posts: List[TwitterPost] = Field(default_factory=list)
     raw_data: Dict[str, Any] = Field(default_factory=dict)
-    saved_file: Optional[str] = None

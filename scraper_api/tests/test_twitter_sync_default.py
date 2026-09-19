@@ -22,3 +22,5 @@ def test_twitter_scraper_uses_sync_mode_by_default(monkeypatch):
     client = scraper._build_client()
 
     assert client.config.api_http_mode == "sync"
+    assert client.config.pool_wait_max_s == 0
+    assert client.config.max_task_attempts == 1

@@ -63,19 +63,19 @@ class YouTubeService:
             logger.exception("youtube_extract_video_failed", exc_info=exc)
             raise ScraperUpstreamError("Failed to extract YouTube video data") from exc
 
-    async def extract_channel(self, channel_url: str, max_videos: int = 20, include_comments: bool = False) -> Dict[str, Any]:
+    async def extract_channel(self, channel_url: str, max_videos: int = 5, include_comments: bool = False) -> Dict[str, Any]:
         """Extract all videos from a YouTube channel."""
         try:
             if not channel_url:
                 raise ScraperValidationError("A valid YouTube channel URL or handle is required.")
 
-            video_urls = get_channel_video_urls(channel_url, max_videos=max_videos)
+            video_urls = get_channel_video_urls(channel_url, max_videos=min(max_videos, 5))
             if not video_urls:
                 raise ScraperValidationError("No videos were found for the supplied channel.")
 
             extractor = YouTubeExtractor()
             videos = []
-            for video_url in video_urls:
+            for video_url in video_urls[:5]:
                 video_id = get_video_id_from_url(video_url)
                 if not video_id:
                     continue
@@ -105,7 +105,7 @@ class YouTubeService:
 
             extractor = YouTubeExtractor()
             videos = []
-            for video_url in video_urls:
+            for video_url in video_urls[:5]:
                 video_id = get_video_id_from_url(video_url)
                 if not video_id:
                     continue
