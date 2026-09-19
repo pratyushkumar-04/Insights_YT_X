@@ -38,14 +38,18 @@ class TwitterPost(BaseModel):
     likes: int
     retweets: int
     replies: int
-    comments: list[dict] = []
-    raw_data: dict
+    comments: list[dict] = Field(default_factory=list)
+    raw_data: dict = Field(default_factory=dict)
+    saved_file: Optional[str] = None
+
+
 class TwitterSearchResponse(BaseModel):
     """Response for a search on Twitter/X."""
 
     query: str
     results: List[TwitterPost] = Field(default_factory=list)
     total: int = 0
+    saved_file: Optional[str] = None
 
 
 class TwitterUserResponse(BaseModel):
@@ -59,3 +63,4 @@ class TwitterUserResponse(BaseModel):
     verified: Optional[bool] = False
     posts: List[TwitterPost] = Field(default_factory=list)
     raw_data: Dict[str, Any] = Field(default_factory=dict)
+    saved_file: Optional[str] = None

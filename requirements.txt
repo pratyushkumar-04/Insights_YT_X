@@ -8,4 +8,5 @@ tqdm>=4.66.0
 colorama>=0.4.6
 nltk>=3.8.1
 scweet>=5.0.0
+curl_cffi==0.15.0
 openpyxl>=3.1.0

@@ -104,9 +104,12 @@ class TwitterScraper:
             except ImportError as error:
                 raise RuntimeError("Scweet is required. Install dependencies with: pip install -r requirements.txt") from error
             
-            kwargs: Dict[str, Any] = {
-                "config": ScweetConfig(daily_requests_limit=10000, daily_tweets_limit=100000)
-            }
+            config = ScweetConfig(
+                daily_requests_limit=10000,
+                daily_tweets_limit=100000,
+                api_http_mode="sync",
+            )
+            kwargs: Dict[str, Any] = {"config": config}
             if self.auth_token:
                 kwargs["auth_token"] = self.auth_token
             self._client = Scweet(**kwargs)
