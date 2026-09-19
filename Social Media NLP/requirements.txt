@@ -1,0 +1,13 @@
+langchain
+nltk
+bs4
+emoji
+linguonnx
+ai4bharat.transliteration
+sentence-transformers
+scikit-learn
+numpy
+langchain_google_genai
+gdown
+python-dotenv
+catboost
